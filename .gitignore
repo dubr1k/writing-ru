@@ -2,3 +2,5 @@ __pycache__/
 *.py[cod]
 .venv/
 .DS_Store
+# Частный контекст автора и окружения — у каждого свой, в репозиторий не попадает.
+skills/writing-ru/russian-text-craft/references/private/
