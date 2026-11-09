@@ -10,6 +10,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'skills/writing-ru/russian-text-craft/scripts/ru_text_check.py'
+if not SCRIPT.exists():
+    SCRIPT = ROOT / 'skills/russian-text-craft/scripts/ru_text_check.py'
 spec = importlib.util.spec_from_file_location('checker', SCRIPT)
 assert spec is not None and spec.loader is not None
 checker = importlib.util.module_from_spec(spec)
@@ -114,6 +116,31 @@ class AnalyzeTests(unittest.TestCase):
                 report = checker.analyze(text)
                 self.assertIn('placeholder', groups(report))
                 self.assertTrue(report['red'])
+
+    def test_fences_preserve_lines_and_do_not_close_on_inner_marker(self):
+        md = '  ````python\nTODO\n```\nTODO\n  ````\nКот спит.\nTODO: конец.'
+        cleaned = checker.strip_markdown(md)
+        report = checker.analyze(cleaned)
+        self.assertEqual([f['line'] for f in report['findings']], [7])
+        self.assertEqual(len(cleaned.splitlines()), len(md.splitlines()))
+
+    def test_unclosed_fence_ignores_remaining_code(self):
+        self.assertEqual(checker.analyze(checker.strip_markdown('~~~text\nTODO'))['findings'], [])
+
+    def test_multibacktick_inline_code_and_quote_scope(self):
+        md = 'Команда ``print(`TODO`)`` готова.\n> TODO\nTODO'
+        report = checker.analyze(checker.strip_markdown(md, skip_quotes=True))
+        self.assertEqual([f['line'] for f in report['findings']], [3])
+
+    def test_unmatched_inline_delimiter_keeps_prose(self):
+        report = checker.analyze(checker.strip_markdown('Символ ` не закрыт. TODO'))
+        self.assertIn('placeholder', groups(report))
+
+    def test_literal_quote_can_be_red_but_is_not_an_authorship_verdict(self):
+        report = checker.analyze('В диалоге сказано: «Вот вариант: кот спит».')
+        self.assertTrue(report['red'])
+        self.assertIn('agent_leak', groups(report))
+
 
     def test_narrowed_patterns(self):
         report = checker.analyze('Данные лежат в файле. Журнал хранит вызовы инструментов и вызовы API.')

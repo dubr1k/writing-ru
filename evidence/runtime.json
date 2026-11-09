@@ -1,0 +1,160 @@
+{
+  "date": "2026-11-09",
+  "runtime": "Oh My Pi",
+  "version": "18.18.2",
+  "scope": "isolated native project discovery and exact file reads, not model behavior",
+  "workspace": "dist/runtime-probe/workspace",
+  "target": "dist/runtime-probe/workspace/.omp/skills",
+  "environment": "fresh HOME, PI_CODING_AGENT_DIR, PI_CONFIG_DIR, XDG config/cache; no inherited credentials",
+  "empty_discovery": {
+    "skills": 0,
+    "warnings": 0
+  },
+  "installed_discovery": {
+    "skills": 19,
+    "warnings": [],
+    "sources": [
+      "native:project"
+    ],
+    "names": [
+      "ru-academic-article",
+      "ru-agent-report",
+      "ru-analytical-note",
+      "ru-business-correspondence",
+      "ru-expert-commentary",
+      "ru-grant-proposal",
+      "ru-knowledge-note",
+      "ru-official-documents",
+      "ru-popular-explainer",
+      "ru-presentation-text",
+      "ru-review-and-feedback",
+      "ru-short-copy",
+      "ru-speech-and-scenario",
+      "ru-teaching-materials",
+      "ru-technical-docs",
+      "ru-telegram-post",
+      "ru-transcript-editing",
+      "ru-translation",
+      "russian-text-craft"
+    ]
+  },
+  "reads": [
+    {
+      "uri": "skill://ru-academic-article/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-agent-report/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-analytical-note/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-business-correspondence/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-expert-commentary/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-grant-proposal/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-knowledge-note/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-official-documents/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-popular-explainer/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-presentation-text/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-review-and-feedback/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-short-copy/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-speech-and-scenario/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-teaching-materials/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-technical-docs/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-telegram-post/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-transcript-editing/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://ru-translation/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://russian-text-craft/SKILL.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://russian-text-craft/references/author-voice.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://russian-text-craft/references/editing-modes.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://russian-text-craft/references/ru-ai-patterns.md:raw",
+      "exit": 0,
+      "exact_content": true
+    },
+    {
+      "uri": "skill://russian-text-craft/references/editorial-triage.md:raw",
+      "exit": 0,
+      "exact_content": true
+    }
+  ],
+  "provider_prompts": 0,
+  "other_runtimes": "Pi, Codex, Claude Code, OpenClaw unavailable in PATH; structural/package checks only"
+}

@@ -1,0 +1,37 @@
+{
+  "openclaw": {
+    "title": "OpenClaw",
+    "project_root": "skills",
+    "invoke": "$russian-text-craft $ru-business-correspondence",
+    "reading": "OpenClaw: прочитай SKILL.md и ссылки доступным файловым инструментом; {baseDir} — каталог текущего навыка. Для жанра ядро лежит в ../russian-text-craft/SKILL.md. Shell-команду checker запускай через доступный exec только в разрешённом host/sandbox; Python и файл должны быть доступны в том же окружении. Не переключай host ради обхода запрета.",
+    "core_dir": "{baseDir}"
+  },
+  "codex": {
+    "title": "Codex",
+    "project_root": ".agents/skills",
+    "invoke": "$russian-text-craft $ru-business-correspondence",
+    "reading": "Codex: прочитай полный SKILL.md по пути из каталога навыков и соседние references штатным чтением файлов. Не считай упоминание навыка загрузкой его тела. Shell-механизм зависит от выбранного интерфейса Codex; запускай обычную команду checker только если shell и Python доступны в разрешённом sandbox. Этот пакет не объявляет собственных tools и не меняет approvals.",
+    "core_dir": "<абсолютный каталог russian-text-craft из каталога навыков>"
+  },
+  "claude-code": {
+    "title": "Claude Code",
+    "project_root": ".claude/skills",
+    "invoke": "/russian-text-craft",
+    "reading": "Claude Code: открой полный SKILL.md ядра и жанра через Read; supporting files не загружаются автоматически. Для checker используй Bash при наличии разрешения и Python в текущем окружении. Пакет не задаёт allowed-tools, hooks, model или автоматические shell-вставки; sandbox и permissions остаются настройкой пользователя.",
+    "core_dir": "<абсолютный каталог russian-text-craft из пути SKILL.md>"
+  },
+  "pi": {
+    "title": "Pi",
+    "project_root": ".pi/skills",
+    "invoke": "/skill:russian-text-craft",
+    "reading": "Pi: прочитай SKILL.md ядра и жанра инструментом read по пути из каталога навыков; относительные references разрешай от каталога соответствующего SKILL.md. Для checker используй bash, если он включён и Python доступен. Явный /skill:name загружает навык, но не его зависимости. Навык не создаёт sandbox и не включает отключённые инструменты.",
+    "core_dir": "<абсолютный каталог russian-text-craft из пути SKILL.md>"
+  },
+  "oh-my-pi": {
+    "title": "Oh My Pi",
+    "project_root": ".omp/skills",
+    "invoke": "/skill:russian-text-craft",
+    "reading": "Oh My Pi: прочитай ядро через read с skill://russian-text-craft, жанр — через skill://<имя-жанра>. References доступны как skill://russian-text-craft/references/<имя>. Для checker используй bash с физическим путём каталога ядра из discovery; не подменяй отключённый shell другим инструментом. Provider discovery ожидает skills/<name>/SKILL.md без промежуточной папки семейства.",
+    "core_dir": "<абсолютный baseDir ядра из discovery>"
+  }
+}

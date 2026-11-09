@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # ---------------------------------------------------------------- стоп-фразы
 # Группы соответствуют references/ru-ai-patterns.md. Шаблоны без учёта регистра.
@@ -156,8 +156,8 @@ RHETORIC = re.compile(r"\?\s+(Это значит|Ответ|Потому что
 SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+(?=[«\"A-ZА-ЯЁ0-9])")
 WORD = re.compile(r"[А-Яа-яЁёA-Za-z][\w-]*")
 
-FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.S | re.M)
-INLINE_CODE = re.compile(r"`[^`\n]+`")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
 URL = re.compile(r"https?://\S+")
 MD_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
@@ -203,7 +203,22 @@ def _blank(m: re.Match) -> str:
 
 
 def strip_markdown(text: str, skip_quotes: bool = False) -> str:
-    text = FENCE.sub(_blank, text)
+    # Закрывающий fence той же породы, не короче открывающего.
+    # Незакрытый блок продолжается до EOF; номера строк сохраняются.
+    out = []
+    fence = None
+    for line in text.splitlines(keepends=True):
+        marker = FENCE.match(line.rstrip("\r\n"))
+        if fence is not None:
+            out.append(re.sub(r"[^\r\n]", " ", line))
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                fence = None
+        elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
+            fence = marker[1]
+            out.append(re.sub(r"[^\r\n]", " ", line))
+        else:
+            out.append(line)
+    text = "".join(out)
     text = HTML_COMMENT.sub(_blank, text)
     text = INLINE_CODE.sub(_blank, text)
     text = MD_LINK_TARGET.sub(lambda m: "](" + " " * len(m.group(1)) + ")", text)
