@@ -127,6 +127,19 @@ python3 -I skills/russian-text-craft/scripts/ru_text_check.py tests/fixtures/pos
 
 Ожидаемый код **1**: синтетический пример содержит красные сигналы; это не ошибка установки.
 
+Лимиты задавайте по брифу: `--max-chars N`, `--max-words N`, `--min-words N`.
+Пример проверки верхней границы из корня пакета:
+
+```bash
+python3 -I -B skills/russian-text-craft/scripts/ru_text_check.py tests/fixtures/positive.txt --genre technical --max-words 1 --strict --json
+```
+
+Ожидаемый код **1**: образец длиннее одного слова. В JSON `mandatory` и `blocking` относятся к обязательным
+проверкам, `style` — к редакторским сигналам; `--strict` также реагирует на красные стилевые сигналы.
+Версия checker — 2.2.0. Разбор находок: [editorial-triage](skills/russian-text-craft/references/editorial-triage.md);
+оценка качества навыков: [evaluation-protocol](skills/russian-text-craft/references/evaluation-protocol.md).
+Наличие этих файлов и успешный CLI-тест не подтверждают их применение моделью.
+
 ## Обновление и удаление
 
 Silent overwrite отсутствует: существующий target всегда вызывает отказ. Для обновления установите новый пакет в

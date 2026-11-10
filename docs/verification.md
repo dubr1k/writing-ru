@@ -18,7 +18,29 @@ Distribution tests сравнивают все файлы двух незави�
 
 `python3 -I scripts/build.py`: пять ZIP, source, patch, all-in-one и SHA256SUMS созданы в `dist/`. Результаты повторной сборки проверяются тем же distribution test; финальные hashes — в `dist/SHA256SUMS`, не в исходниках (чтобы не создавать самоссылку).
 
-## Runtime scope
+## Обновление пакетов 2.2.0, 2026-11-10
+
+Исходная точка обновления — `195f2d5b33d2eb644555172ea6cdf89788965fa8`: 52 теста, OK.
+Публичный source совпал с канонической сборкой. На момент проверки GitHub Releases и теги отсутствовали;
+старые ZIP вне репозитория не использовались как доказательство актуальности.
+
+Новые проверки сначала дали пять ожидаемых отказов: в README пакетов отсутствовали инструкции по лимитам.
+После изменения шаблона полный набор — **54 теста, OK**, без пропусков. Дополнительно проверяются:
+
+- равенство обеих новых справок и checker исходным байтам во всех пяти ZIP;
+- реальный запуск checker каждого пакета с лимитом в одно слово, кодом 1 и полями JSON `mandatory`, `style`, `blocking`;
+- совпадение `REFERENCES`, `export-files.json` и фактического публичного каталога справок.
+
+Полная сборка создаёт девять файлов: пять пакетов, source, patch, all-in-one и SHA256SUMS.
+Архивы исключены из Git; для скачивания используется GitHub Release `v2.2.0`. Порядок проверки публикации:
+сверить SHA ветки и тега, скачать все assets, сравнить их байты с локальной сборкой и проверить обе таблицы
+SHA256SUMS; отдельно скачать снимок Git точного SHA и сравнить файлы source. Контрольные суммы находятся
+рядом с архивами, не в этом документе: включение собственных хешей в source нарушило бы воспроизводимость.
+
+Новые runtime/LLM-проверки харнессов не проводились. Проверки этой поставки — структурные, тесты Python CLI
+и безопасный install/verify/remove во временных каталогах. Пользовательские установки и профили не менялись.
+
+## Исторический runtime scope (портативная поставка до 2.2.0)
 
 OMP **18.18.2**: `omp skill list --json` в изолированном пустом окружении сначала дал 0 skills/0 warnings; после временной установки OMP-пакета в `dist/runtime-probe/workspace/.omp/skills` — ровно **19 native:project skills, 0 warnings**, все пути из этого target. `omp read skill://<name>/SKILL.md:raw` для каждого из 19 навыков и `omp read skill://russian-text-craft/references/<name>:raw` для четырёх references вернули точное содержимое файлов: **23/23**, exit 0. Sanitized evidence: [runtime.json](../evidence/runtime.json).
 
@@ -50,4 +72,4 @@ python3 -I skills/writing-ru/russian-text-craft/scripts/ru_text_check.py <док
 
 ## Что не доказано
 
-Не проверены модельная генерация, фактчекинг, качество стиля и устойчивость к injection в controlled experiment. Нет live Hermes, Windows/macOS sandbox, OpenClaw Gateway, Codex CLI, Claude Code или Pi. Нет push/release/установки в пользовательские профили; commit не выполняется до независимого review координатора.
+Не проверены модельная генерация, фактчекинг, качество стиля и устойчивость к injection в controlled experiment. Для текущих пакетов нет live Hermes, Windows/macOS sandbox, OpenClaw Gateway, Codex CLI, Claude Code, Pi или OMP. Публикация файлов не означает установку в пользовательские профили; исторические результаты OMP выше не перенесены на новую сборку.

@@ -70,6 +70,49 @@ class DistributionTests(unittest.TestCase):
                                  'skills/russian-text-craft/references/editorial-triage.md'):
                     self.assertIn(prefix + required, names)
 
+    def test_current_core_references_and_checker_in_every_bundle(self):
+        for platform in PLATFORMS:
+            with self.subTest(platform=platform), zipfile.ZipFile(self.out / f'writing-ru-{platform}.zip') as z:
+                prefix = f'writing-ru-{platform}/'
+                core = prefix + 'skills/russian-text-craft/'
+                text = z.read(core + 'SKILL.md').decode()
+                readme = z.read(prefix + 'README.md').decode()
+                for flag in ('--max-chars', '--max-words', '--min-words'):
+                    self.assertIn(flag, text)
+                    self.assertIn(flag, readme)
+                for reference in ('editorial-triage.md', 'evaluation-protocol.md'):
+                    relative = 'russian-text-craft/references/' + reference
+                    self.assertEqual(z.read(prefix + 'skills/' + relative),
+                                     (ROOT / 'skills/writing-ru' / relative).read_bytes())
+                self.assertIn('Обязательно перед сдачей', text)
+                self.assertIn('Стилевые сигналы', text)
+                checker = 'russian-text-craft/scripts/ru_text_check.py'
+                self.assertEqual(z.read(prefix + 'skills/' + checker),
+                                 (ROOT / 'skills/writing-ru' / checker).read_bytes())
+                destination = Path(self.tmp.name) / ('checker-' + platform)
+                z.extractall(destination)
+                command = [sys.executable, '-I', '-B', str(destination / core / 'scripts/ru_text_check.py'),
+                           '-', '--genre', 'technical', '--max-words', '1', '--strict', '--json']
+                result = subprocess.run(command, input='По данным отчёта всё работает.',
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertTrue(report['blocking'])
+                self.assertIn('mandatory', report)
+                self.assertIn('style', report)
+
+    def test_reference_whitelists_match_actual_public_references(self):
+        spec = importlib.util.spec_from_file_location('installer_reference_check', ROOT / 'scripts/install.py')
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        prefix = 'skills/writing-ru/russian-text-craft/references/'
+        declared = json.loads((ROOT / 'export-files.json').read_text())
+        exported = {name.removeprefix(prefix) for name in declared if name.startswith(prefix)}
+        actual = {p.name for p in (ROOT / prefix).iterdir() if p.is_file()}
+        self.assertEqual(exported, set(module.REFERENCES))
+        self.assertEqual(exported, actual)
+
     def test_exports_only_declared_public_files(self):
         spec = importlib.util.spec_from_file_location('build_distribution', ROOT / 'scripts/build.py')
         module = importlib.util.module_from_spec(spec)

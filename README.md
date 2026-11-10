@@ -8,7 +8,7 @@
 
 [Установка](#установка-в-hermes) · [Навыки](#что-внутри) · [Свой голос и окружение](#свой-голос-и-окружение) · [Проверка текста](#проверка-текста) · [Примеры А/Б](examples/README.md) · [MIT](LICENSE)
 
-Переносимые пакеты для **OpenClaw, Codex, Claude Code, Pi и Oh My Pi** собираются из этого же canonical source: [сборка и безопасный installer](docs/install.md), [официальные контракты](docs/platforms.md), [аудит](docs/audit.md), [проверки](docs/verification.md). Готовые ZIP и SHA256SUMS находятся в ignored `dist/` после `python3 -I scripts/build.py`; это не release и не установка.
+Переносимые пакеты для **OpenClaw, Codex, Claude Code, Pi и Oh My Pi** собираются из этого же canonical source: [сборка и безопасный installer](docs/install.md), [официальные контракты](docs/platforms.md), [аудит](docs/audit.md), [проверки](docs/verification.md). Готовые ZIP и SHA256SUMS доступны в разделе **Releases** этого репозитория; выбирайте файлы одного тега. Состав и получение — в [инструкции](docs/install.md#получение-пакетов). Локальная сборка: `python3 -I -B scripts/build.py`; результаты находятся в исключённом из Git `dist/`. Сборка не устанавливает навыки.
 
 ## Что внутри
 
@@ -185,6 +185,7 @@ skills/writing-ru/
     references/editing-modes.md      # режимы правки, сокращение, учебные работы
     references/author-voice.md       # шаблон калибровки голоса
     references/editorial-triage.md   # исправить / оставить / спросить автора
+    references/evaluation-protocol.md # оценка качества семейства
     scripts/ru_text_check.py
   ru-*/SKILL.md                      # 18 жанров
 examples/                            # A, B и методическая оговорка
