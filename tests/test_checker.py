@@ -39,15 +39,85 @@ class CliTests(unittest.TestCase):
     def test_default_exit_is_advisory(self):
         p = self.cli(ROOT / 'tests/fixtures/positive.txt')
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn('Сигналы:', p.stdout)
+        self.assertIn('Обязательно перед сдачей:', p.stdout)
+        self.assertIn('Стилевые сигналы:', p.stdout)
+        self.assertNotIn('\nСигналы:', p.stdout)
 
     def test_known_false_positives_not_flagged(self):
         p = self.cli(ROOT / 'tests/fixtures/false-positive.md', '--json', '--strict')
         self.assertEqual(p.returncode, 0, p.stderr)
         report = json.loads(p.stdout)
         matches = {f['match'].lower() for f in report['findings']}
-        self.assertFalse({'данные', 'вызовы', 'шеф'} & matches, matches)
+        self.assertFalse({'данные', 'вызовы', 'шеф', 'данным'} & matches, matches)
         self.assertFalse(report['red'])
+
+    def test_po_dannym_not_flagged_but_dannym_sposobom_is(self):
+        p = self.cli(ROOT / 'tests/fixtures/false-positive.md', '--json')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        text = (ROOT / 'tests/fixtures/false-positive.md').read_text(encoding='utf-8')
+        self.assertIn('По данным опроса', text)
+        self.assertIn('Согласно данным отчёта', text)
+        self.assertNotIn('kancelyarit', groups(json.loads(p.stdout)))
+        p = self.cli('-', '--json', text='Данным способом пользуются редко.')
+        found = [f['match'] for f in json.loads(p.stdout)['findings'] if f['group'] == 'kancelyarit']
+        self.assertEqual(found, ['Данным'])
+
+    def test_json_has_mandatory_style_and_flags_is_union(self):
+        p = self.cli(ROOT / 'tests/fixtures/positive.txt', '--json')
+        report = json.loads(p.stdout)
+        self.assertIn('mandatory', report)
+        self.assertIn('style', report)
+        self.assertIn('blocking', report)
+        self.assertTrue(report['style'])
+        self.assertEqual(report['flags'], report['mandatory'] + report['style'])
+        self.assertEqual(report['red'], any(s == 'red' for s, _ in report['flags']))
+
+    def test_mandatory_section_in_text_report(self):
+        p = self.cli('-', text='Босс, вот текст письма.')
+        self.assertIn('Обязательно перед сдачей:', p.stdout)
+        self.assertNotIn('Обязательные проверки пройдены', p.stdout)
+        p = self.cli('-', '--max-chars', '100', text='Кот спит.')
+        self.assertIn('Обязательные проверки пройдены: служебных реплик нет, плейсхолдеров нет, объём 9 знаков в пределах лимита', p.stdout)
+        p = self.cli('-', text='Кот спит.')
+        self.assertIn('плейсхолдеров нет.', p.stdout)
+        self.assertNotIn('объём', p.stdout.split('Стилевые')[0])
+
+    def test_volume_limits_json_and_strict(self):
+        text = 'Кот спит на окне. ' * 10  # 40 слов, 179 знаков после strip
+        p = self.cli('-', '--json', '--strict', '--max-chars', '100', text=text)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        report = json.loads(p.stdout)
+        self.assertTrue(report['blocking'])
+        self.assertTrue(report['red'])
+        self.assertEqual([m for _, m in report['mandatory']],
+                         ['Объём: 179 знаков с пробелами при лимите 100 (+79)'])
+        p = self.cli('-', '--json', '--max-words', '20', text=text)
+        report = json.loads(p.stdout)
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual([m for _, m in report['mandatory']], ['Объём: 40 слов при лимите 20 (+20)'])
+        p = self.cli('-', '--json', '--strict', '--min-words', '60', text=text)
+        report = json.loads(p.stdout)
+        self.assertEqual(p.returncode, 1)
+        self.assertEqual([m for _, m in report['mandatory']], ['Объём: 40 слов при минимуме 60 (-20)'])
+        p = self.cli('-', '--json', '--strict', '--max-chars', '500', '--max-words', '100', '--min-words', '10', text=text)
+        report = json.loads(p.stdout)
+        self.assertFalse(report['blocking'])
+        self.assertEqual(report['mandatory'], [])
+
+    def test_no_volume_args_no_volume_check(self):
+        report = json.loads(self.cli('-', '--json', text='Кот спит. ' * 5000).stdout)
+        self.assertFalse(report['blocking'])
+        self.assertEqual(report['limits'], {})
+
+    def test_bad_volume_args_rejected(self):
+        self.assertEqual(self.cli('-', '--max-chars', '-5', text='Кот.').returncode, 2)
+        self.assertEqual(self.cli('-', '--min-words', '9', '--max-words', '3', text='Кот.').returncode, 2)
+
+    def test_leak_is_mandatory_not_style(self):
+        report = json.loads(self.cli('-', '--json', text='Босс, вот текст письма.').stdout)
+        self.assertTrue(report['blocking'])
+        self.assertTrue(any('Служебные реплики' in m for _, m in report['mandatory']))
+        self.assertFalse(any('Служебные реплики' in m for _, m in report['style']))
 
     def test_stdin_and_markdown_flag(self):
         p = self.cli('-', '--json', '--markdown', text='Кот спит. `В современном мире` — это код.')
@@ -147,6 +217,12 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(report['findings'], [])
         report = checker.analyze('Данная статья посвящена тому, какие вызовы стоят перед школой.')
         self.assertEqual(groups(report), {'kancelyarit', 'landshaft'})
+
+    def test_analyze_volume_arguments(self):
+        report = checker.analyze('Кот спит.', raw_text='Кот спит.', max_chars=5)
+        self.assertEqual(report['mandatory'], [('red', 'Объём: 9 знаков с пробелами при лимите 5 (+4)')])
+        report = checker.analyze('Кот спит.', raw_text='Кот спит.')
+        self.assertFalse(report['blocking'])
 
     def test_markdown_code_urls_and_comments_ignored_lines_preserved(self):
         md = ('# Заголовок\n\n```text\nВ современном мире важно отметить\n```\n\n'

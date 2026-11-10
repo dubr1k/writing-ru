@@ -6,6 +6,15 @@
 Выход: отчёт на русском; --json — машинный вывод; --strict — код 1 при красном сигнале.
 Коды: 0 — анализ выполнен; 1 — --strict и есть красный сигнал; 2 — ошибка чтения или разбора.
 
+Отчёт разделён на две части.
+«Обязательно перед сдачей» — блокирующие проверки: служебные реплики агента, незаполненные
+плейсхолдеры, объём вне заданных пределов. «Стилевые сигналы» — всё остальное: ритм, шаблонные
+обороты, отвлечённые существительные и прочие советы по правке.
+Объём проверяется только если заданы --max-chars N (знаки с пробелами), --max-words N
+или --min-words N; выход за предел — красная обязательная проверка.
+В JSON: mandatory и style (списки пар [severity, сообщение]), flags — их объединение,
+red — есть ли красный сигнал в любом разделе, blocking — есть ли непройденная обязательная проверка.
+
 Это эвристики для ручной проверки, а не определение авторства или ИИ-генерации.
 """
 from __future__ import annotations
@@ -19,7 +28,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 # ---------------------------------------------------------------- стоп-фразы
 # Группы соответствуют references/ru-ai-patterns.md. Шаблоны без учёта регистра.
@@ -54,7 +63,11 @@ STOP_GROUPS: dict[str, tuple[str, list[str]]] = {
     ]),
     "kancelyarit": ("Канцелярит", [
         # Только указательное «данный» в единственном числе: «данные» обычно существительное.
-        r"\bданн(ый|ая|ое|ого|ой|ом|ым|ую)\b", r"\bв рамках\b", r"\bв целях\b", r"\bосуществл\w+",
+        # «данным» после «по», «согласно», «судя по», «благодаря», «вопреки» — дательный падеж
+        # существительного («по данным опроса»), его не отмечаем.
+        r"\bданн(ый|ая|ое|ого|ой|ом|ую)\b",
+        r"(?<!\bпо\s)(?<!\bсогласно\s)(?<!\bблагодаря\s)(?<!\bвопреки\s)\bданным\b",
+        r"\bв рамках\b", r"\bв целях\b", r"\bосуществл\w+",
         r"\bимеет место\b", r"\bна предмет\b", r"\bв части\b", r"\bпо вопросу\b",
         r"\bпредставля\w+ собой\b", r"\bвыступа\w+ в качестве\b", r"\bоказыва\w+ (влияние|воздействие)",
         r"\bпроизвод\w+ анализ", r"\bиме\w+ возможность\b", r"\bнос\w+ характер\b",
@@ -246,7 +259,14 @@ def cv(values: list[float]) -> float:
     return statistics.pstdev(values) / mean if mean else 0.0
 
 
-def analyze(text: str, genre: str = "general", raw_text: str | None = None) -> dict:
+def fmt_int(n: int) -> str:
+    """4812 -> «4 812»."""
+    return f"{n:,}".replace(",", " ")
+
+
+def analyze(text: str, genre: str = "general", raw_text: str | None = None,
+            max_chars: int | None = None, max_words: int | None = None,
+            min_words: int | None = None) -> dict:
     g = GENRES[genre]
     raw = text if raw_text is None else raw_text
     lines = text.splitlines()
@@ -303,11 +323,23 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None) -> d
         "straight_quote_spans": len(straight), "rhetorical_qa": len(rhetoric),
     }
 
-    flags: list[tuple[str, str]] = []
+    # Обязательные проверки сдачи: блокируют отправку.
+    mandatory: list[tuple[str, str]] = []
     for key in sorted(IMMEDIATE_RED):
         hits = [f for f in findings if f["group"] == key]
         if hits:
-            flags.append(("red", f"{STOP_GROUPS[key][0]}: {len(hits)} (стр. {', '.join(str(h['line']) for h in hits[:8])}). Убери до отправки."))
+            mandatory.append(("red", f"{STOP_GROUPS[key][0]}: {len(hits)} (стр. {', '.join(str(h['line']) for h in hits[:8])}). Убери до отправки."))
+    chars = metrics["chars_with_spaces"]
+    if max_chars is not None and chars > max_chars:
+        mandatory.append(("red", f"Объём: {fmt_int(chars)} знаков с пробелами при лимите {fmt_int(max_chars)} (+{fmt_int(chars - max_chars)})"))
+    if max_words is not None and n_words > max_words:
+        mandatory.append(("red", f"Объём: {fmt_int(n_words)} слов при лимите {fmt_int(max_words)} (+{fmt_int(n_words - max_words)})"))
+    if min_words is not None and n_words < min_words:
+        mandatory.append(("red", f"Объём: {fmt_int(n_words)} слов при минимуме {fmt_int(min_words)} (-{fmt_int(min_words - n_words)})"))
+    limits = {k: v for k, v in (("max_chars", max_chars), ("max_words", max_words), ("min_words", min_words)) if v is not None}
+
+    # Стилевые сигналы: советы по правке.
+    flags: list[tuple[str, str]] = []
     if g["cv_red"] is not None and len(sent_lens) >= 6 and metrics["sentence_len_cv"] < g["cv_red"]:
         flags.append(("red", f"Монотонный ритм: разброс длины предложений низкий (CV={metrics['sentence_len_cv']}, средняя {metrics['sentence_len_mean']} слов). Добавь короткие и длинные."))
     elif g["cv_red"] is None and len(sent_lens) >= 6 and metrics["sentence_len_cv"] < 0.3:
@@ -350,8 +382,11 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None) -> d
     if len(prio) >= 3:
         flags.append(("red", f"Шаблонных оборотов из приоритетных групп: {len(prio)}."))
 
+    style = flags
+    all_flags = mandatory + style
     return {"version": VERSION, "genre": genre, "metrics": metrics, "findings": findings,
-            "flags": flags, "red": any(s == "red" for s, _ in flags)}
+            "limits": limits, "mandatory": mandatory, "style": style, "flags": all_flags,
+            "red": any(s == "red" for s, _ in all_flags), "blocking": bool(mandatory)}
 
 
 # ---------------------------------------------------------------- вывод
@@ -364,11 +399,29 @@ def render(report: dict, path: str) -> str:
            f"отвлечённых существительных {m['nominal_per_100']}/100; «является» {m['copula_count']}; троек {m['triads']}; "
            f"тире {m['em_dash_per_100']}/100; жирного {m['bold_spans']}; эмодзи {m['emoji']}; латиницы {m['latin_words']}.",
            ""]
-    if report["flags"]:
-        out.append("Сигналы:")
-        for sev, msg in report["flags"]:
+    out.append("Обязательно перед сдачей:")
+    if report["mandatory"]:
+        for sev, msg in report["mandatory"]:
             out.append(f"  [{'КРАСНЫЙ' if sev == 'red' else 'жёлтый'}] {msg}")
-        out.append("")
+    else:
+        lim = report.get("limits", {})
+        ok = "служебных реплик нет, плейсхолдеров нет"
+        parts = []
+        if "max_chars" in lim:
+            parts.append(f"{fmt_int(m['chars_with_spaces'])} знаков")
+        if "max_words" in lim or "min_words" in lim:
+            parts.append(f"{fmt_int(m['words'])} слов")
+        if parts:
+            ok += f", объём {' и '.join(parts)} в пределах лимита"
+        out.append(f"  Обязательные проверки пройдены: {ok}.")
+    out.append("")
+    if report["style"]:
+        out.append("Стилевые сигналы:")
+        for sev, msg in report["style"]:
+            out.append(f"  [{'КРАСНЫЙ' if sev == 'red' else 'жёлтый'}] {msg}")
+    else:
+        out.append("Стилевые сигналы: нет.")
+    out.append("")
     if report["findings"]:
         out.append(f"Шаблонные обороты ({len(report['findings'])}):")
         by_group: dict[str, list[dict]] = {}
@@ -389,17 +442,35 @@ def render(report: dict, path: str) -> str:
     return "\n".join(out)
 
 
+def non_negative_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"нужно целое число, получено «{value}»")
+    if n < 0:
+        raise argparse.ArgumentTypeError("число не может быть отрицательным")
+    return n
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Редакторская проверка русского текста; не детектор ИИ.")
+    ap = argparse.ArgumentParser(
+        description="Редакторская проверка русского текста; не детектор ИИ. "
+                    "Отчёт: «Обязательно перед сдачей» (служебные реплики, плейсхолдеры, объём) "
+                    "и «Стилевые сигналы» (остальное).")
     ap.add_argument("path", help="файл .txt/.md/.docx или «-» для stdin")
     ap.add_argument("--genre", choices=sorted(GENRES), default="general", help="жанровые пороги (по умолчанию general)")
     ap.add_argument("--markdown", action="store_true", help="разбирать как Markdown (для stdin и файлов без .md)")
     ap.add_argument("--keep-code", action="store_true", help="не исключать код, ссылки и HTML-комментарии в Markdown")
     ap.add_argument("--skip-quotes", action="store_true", help="исключить цитаты (строки, начинающиеся с >)")
     ap.add_argument("--json", action="store_true", help="вывод в JSON")
-    ap.add_argument("--strict", action="store_true", help="код выхода 1 при красном сигнале")
+    ap.add_argument("--strict", action="store_true", help="код выхода 1 при красном сигнале, в том числе при выходе за объём")
+    ap.add_argument("--max-chars", type=non_negative_int, metavar="N", help="лимит знаков с пробелами; превышение — обязательная красная проверка")
+    ap.add_argument("--max-words", type=non_negative_int, metavar="N", help="лимит слов; превышение — обязательная красная проверка")
+    ap.add_argument("--min-words", type=non_negative_int, metavar="N", help="минимум слов; недобор — обязательная красная проверка")
     ap.add_argument("--version", action="version", version=VERSION)
     args = ap.parse_args()
+    if args.min_words is not None and args.max_words is not None and args.min_words > args.max_words:
+        ap.error("--min-words больше --max-words")
     try:
         raw = read_text(args.path)
     except (OSError, UnicodeDecodeError, zipfile.BadZipFile, KeyError, ET.ParseError, ValueError) as e:
@@ -411,7 +482,8 @@ def main() -> int:
         text = strip_markdown(raw, skip_quotes=args.skip_quotes)
     elif args.skip_quotes:
         text = re.sub(r"(?m)^\s*>.*$", _blank, raw)
-    report = analyze(text, genre=args.genre, raw_text=raw)
+    report = analyze(text, genre=args.genre, raw_text=raw, max_chars=args.max_chars,
+                     max_words=args.max_words, min_words=args.min_words)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

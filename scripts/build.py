@@ -74,8 +74,8 @@ def adapt_skill(data: bytes, name: str, platform: dict) -> bytes:
     if name != 'russian-text-craft':
         intro += 'До применения жанра прочитай [ядро](../russian-text-craft/SKILL.md) полностью; правила сохранности материала и режим правки действуют вместе с этим жанром.\n\n'
     else:
-        old = '`terminal(command="python3 -I <skill_dir>/scripts/ru_text_check.py <файл> --genre <жанр>")`. `<skill_dir>` — поле `skill_dir` из ответа `skill_view`.'
-        command = ('`python3 -I "' + platform['core_dir'] + '/scripts/ru_text_check.py" "<файл>" --genre <жанр>`. '
+        old = '`terminal(command="python3 -I -B <skill_dir>/scripts/ru_text_check.py <файл> --genre <жанр>")`. `<skill_dir>` — поле `skill_dir` из ответа `skill_view`.'
+        command = ('`python3 -I -B "' + platform['core_dir'] + '/scripts/ru_text_check.py" "<файл>" --genre <жанр>`. '
                    'Подставь реальный путь и жанр; угловые скобки — обозначения, не готовая команда. '
                    'Нет Python или разрешённого shell — сообщи, что проверка не выполнена.')
         if body.count(old) != 1:

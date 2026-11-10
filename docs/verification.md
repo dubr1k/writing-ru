@@ -12,7 +12,7 @@
 
 ## Полная проверка
 
-`python3 -I -m unittest discover -s tests -v`: **44 tests, OK** (10.835 s). Внутри этой команды каждый из пяти распакованных пакетов проходит собственные **36 tests**: 27 checker + 9 installer. Это не пять live runtime испытаний.
+`python3 -I -m unittest discover -s tests -v`: **44 tests, OK** (10.835 s) на момент портативной поставки; после выпуска 2.2.0 — 52 tests, OK. Внутри этой команды каждый из пяти распакованных пакетов проходит собственные тесты checker и installer. Это не пять live runtime испытаний.
 
 Distribution tests сравнивают все файлы двух независимых сборок побайтно, проверяют SHA256SUMS, 19 навыков/пакет, стандартный frontmatter, относительные ссылки и отсутствие Hermes tool calls. Privacy-canaries вне whitelist не экспортируются; symlink whitelisted файла блокирует чтение. Полный patch применяется через `git apply --check` и `git apply` к копии baseline с `GIT_CEILING_DIRECTORIES`, после чего каждый файл сравнивается с source ZIP. Из source ZIP без `.git` режим `--packages-only` пересобирает пять побайтно одинаковых пакетов.
 
