@@ -11,6 +11,7 @@
   "docs/verification.md",
   "evidence/baseline.json",
   "evidence/eval-2.3.0.json",
+  "evidence/eval-2.4.0.json",
   "evidence/runtime.json",
   "examples/A.md",
   "examples/B.md",

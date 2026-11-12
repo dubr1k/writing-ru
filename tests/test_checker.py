@@ -193,6 +193,21 @@ class CliTests(unittest.TestCase):
         self.assertEqual(p.stdout, '')
         self.assertIn('Ошибка чтения', p.stderr)
 
+    def test_chat_cli_and_read_errors(self):
+        p = self.cli('-', '--chat', '--fail-on-blocking', text='Шеф, обновление выполнено.')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('сообщение в чат', p.stdout)
+        self.assertIn('Обязательные проверки пройдены: технических следов нет, плейсхолдеров нет', p.stdout)
+        self.assertEqual(self.cli('-', '--fail-on-blocking', text='Шеф, обновление выполнено.').returncode, 1)
+        with tempfile.TemporaryDirectory() as d:
+            missing = self.cli(Path(d) / 'missing.md', '--fail-on-blocking')
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn('Ошибка чтения', missing.stderr)
+            self.assertEqual(missing.stdout, '')
+            broken = Path(d) / 'broken.docx'
+            broken.write_bytes(b'not a zip archive')
+            self.assertEqual(self.cli(broken, '--fail-on-blocking').returncode, 2)
+
     def test_invalid_genre_rejected(self):
         p = self.cli(ROOT / 'tests/fixtures/positive.txt', '--genre', 'poetry')
         self.assertNotEqual(p.returncode, 0)
@@ -354,6 +369,26 @@ class AnalyzeTests(unittest.TestCase):
         self.assertIn('не спрятаны ли за ними действие', joined)
         for order in ('Добавь короткие', 'Переведи часть в глаголы', 'Замени тире'):
             self.assertNotIn(order, joined)
+
+    def test_dannym_noun_vs_adjective(self):
+        for text in ('Доступ к данным предоставляется после согласования.', 'По данным опроса, доля выросла.',
+                     'Согласно данным отчёта, рост продолжился.', 'Ключи к данным хранятся отдельно.'):
+            self.assertNotIn('kancelyarit', groups(checker.analyze(text)), text)
+        for text, word in (('Документ соответствует данным требованиям.', 'данным'),
+                           ('Порядок утверждён данным приказом.', 'данным'), ('Данный отчёт опубликован.', 'Данный')):
+            found = [f['match'] for f in checker.analyze(text)['findings'] if f['group'] == 'kancelyarit']
+            self.assertEqual(found, [word], text)
+
+    def test_chat_mode_keeps_placeholders_and_traces_blocking(self):
+        greeting = 'Босс, nginx обновлён до 1.28.0, сайт отвечает.'
+        self.assertTrue(checker.analyze(greeting)['blocking'])
+        chat = checker.analyze(greeting, chat=True)
+        self.assertFalse(chat['blocking'])
+        self.assertTrue(chat['chat'])
+        self.assertTrue(any('Реплики чата' in msg for _, msg in chat['style']))
+        self.assertTrue(checker.analyze(greeting + ' Срок: [уточнить].', chat=True)['blocking'])
+        self.assertTrue(checker.analyze(greeting + ' contentReference[oaicite:1]', chat=True)['blocking'])
+        self.assertTrue(checker.analyze(greeting, chat=True, raw_text=greeting, max_chars=10)['blocking'])
 
     def test_narrowed_patterns(self):
         report = checker.analyze('Данные лежат в файле. Журнал хранит вызовы инструментов и вызовы API.')

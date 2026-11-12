@@ -78,11 +78,11 @@ class DistributionTests(unittest.TestCase):
                 core = prefix + 'skills/russian-text-craft/'
                 text = z.read(core + 'SKILL.md').decode()
                 readme = z.read(prefix + 'README.md').decode()
-                for flag in ('--max-chars', '--max-words', '--min-words', '--fail-on-blocking'):
+                for flag in ('--max-chars', '--max-words', '--min-words', '--fail-on-blocking', '--chat'):
                     self.assertIn(flag, text)
                     self.assertIn(flag, readme)
-                self.assertIn('Версия checker — 2.3.0', readme)
-                for section in ('## Источники и утверждения', '### Содержание абзацев'):
+                self.assertIn('Версия checker — 2.4.0', readme)
+                for section in ('## Источники и утверждения', '### Содержание абзацев', '## Сопроводительное сообщение'):
                     self.assertIn(section, text)
                 for reference in ('editorial-triage.md', 'evaluation-protocol.md', 'source-verification.md'):
                     relative = 'russian-text-craft/references/' + reference
@@ -104,7 +104,7 @@ class DistributionTests(unittest.TestCase):
                 self.assertTrue(report['blocking'])
                 self.assertIn('mandatory', report)
                 self.assertIn('style', report)
-                self.assertEqual(report['version'], '2.3.0')
+                self.assertEqual(report['version'], '2.4.0')
                 gate = [sys.executable, '-I', '-B', str(destination / core / 'scripts/ru_text_check.py'),
                         '-', '--markdown', '--genre', 'technical', '--fail-on-blocking', '--json']
                 leaked = subprocess.run(gate, input='Вывод подтверждён contentReference[oaicite:1].',

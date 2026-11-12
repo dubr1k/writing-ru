@@ -7,6 +7,8 @@
 Коды: 0 — анализ выполнен; 1 — сработал выбранный режим отказа (см. ниже); 2 — ошибка чтения
 или разбора. Режимы отказа: --fail-on-blocking — код 1 только при непройденной обязательной
 проверке (для автоматической приёмки); --strict — код 1 при любом красном сигнале, включая стилевые.
+--chat — текст является сообщением в чат (отчёт агента, ответ заказчику): обращение и реплики чата
+становятся стилевым сигналом, плейсхолдеры, технические следы и объём остаются обязательными.
 
 Отчёт разделён на две части.
 «Обязательно перед сдачей» — блокирующие проверки: служебные реплики агента, технические следы
@@ -51,7 +53,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 # ---------------------------------------------------------------- стоп-фразы
 # Группы соответствуют references/ru-ai-patterns.md. Шаблоны без учёта регистра.
@@ -86,10 +88,11 @@ STOP_GROUPS: dict[str, tuple[str, list[str]]] = {
     ]),
     "kancelyarit": ("Канцелярит", [
         # Только указательное «данный» в единственном числе: «данные» обычно существительное.
-        # «данным» после «по», «согласно», «судя по», «благодаря», «вопреки» — дательный падеж
-        # существительного («по данным опроса»), его не отмечаем.
+        # «данным» бывает и существительным («по данным опроса», «доступ к данным»), и
+        # прилагательным («данным требованиям», «данным приказом»). Отмечаем только второе:
+        # за ним идёт слово в дательном падеже множественного числа или в творительном единственного.
         r"\bданн(ый|ая|ое|ого|ой|ом|ую)\b",
-        r"(?<!\bпо\s)(?<!\bсогласно\s)(?<!\bблагодаря\s)(?<!\bвопреки\s)\bданным\b",
+        r"\bданным(?=\s+[а-яё]+(?:ам|ям|ом|ем|ём)\b)",
         r"\bв рамках\b", r"\bв целях\b", r"\bосуществл\w+",
         r"\bимеет место\b", r"\bна предмет\b", r"\bв части\b", r"\bпо вопросу\b",
         r"\bпредставля\w+ собой\b", r"\bвыступа\w+ в качестве\b", r"\bоказыва\w+ (влияние|воздействие)",
@@ -365,10 +368,12 @@ def _context(line: str, m: re.Match) -> str:
 
 def analyze(text: str, genre: str = "general", raw_text: str | None = None,
             max_chars: int | None = None, max_words: int | None = None,
-            min_words: int | None = None, layers: dict[str, str] | None = None) -> dict:
+            min_words: int | None = None, layers: dict[str, str] | None = None,
+            chat: bool = False) -> dict:
     """text — видимый текст для стилевого анализа; layers — слои Markdown (markdown_layers).
 
     Без layers весь text считается видимым: технические следы в нём блокируют сдачу.
+    chat — текст является сообщением в чат, а не документом: обращение и реплики чата не блокируют.
     """
     g = GENRES[genre]
     raw = text if raw_text is None else raw_text
@@ -455,9 +460,13 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
     mandatory: list[tuple[str, str]] = []
     notes: list[str] = []
     hidden_notes: list[tuple[str, str]] = []
+    chat_notes: list[tuple[str, str]] = []
     for key in sorted(IMMEDIATE_RED):
         hits = [f for f in findings if f["group"] == key and f["where"] == "text"]
-        if hits:
+        if hits and chat and key == "agent_leak":
+            chat_notes.append(("yellow", f"Реплики чата: {len(hits)} (стр. {where_lines(hits)}). В сообщении обращение по правилам "
+                                         "окружения допустимо; проверь, нет ли лишних предложений услуг и реплик, не нужных читателю."))
+        elif hits:
             mandatory.append(("red", f"{STOP_GROUPS[key][0]}: {len(hits)} (стр. {where_lines(hits)}). Убери до отправки."))
         hits = [f for f in findings if f["group"] == key and f["where"] == "comment"]
         if hits and key == "agent_leak":
@@ -531,9 +540,9 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
     if len(prio) >= 3:
         flags.append(("red", f"Шаблонных оборотов из приоритетных групп: {len(prio)}. Перечитай эти места: есть ли за оборотом мысль или факт."))
 
-    style = flags + hidden_notes
+    style = flags + hidden_notes + chat_notes
     all_flags = mandatory + style
-    return {"version": VERSION, "genre": genre, "metrics": metrics, "findings": findings,
+    return {"version": VERSION, "genre": genre, "chat": chat, "metrics": metrics, "findings": findings,
             "limits": limits, "mandatory": mandatory, "style": style, "flags": all_flags,
             "notes": notes,
             "red": any(s == "red" for s, _ in all_flags), "blocking": bool(mandatory)}
@@ -542,7 +551,8 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
 # ---------------------------------------------------------------- вывод
 def render(report: dict, path: str) -> str:
     m = report["metrics"]
-    out = [f"Проверка текста: {path} (жанр: {report['genre']})",
+    mode = ", сообщение в чат" if report.get("chat") else ""
+    out = [f"Проверка текста: {path} (жанр: {report['genre']}{mode})",
            f"Слов {m['words']} (токенов между пробелами {m['whitespace_tokens']}), предложений {m['sentences']}, абзацев {m['paragraphs']}; "
            f"знаков с пробелами {m['chars_with_spaces']}, без пробелов {m['chars_no_spaces']}.",
            f"Средняя длина предложения {m['sentence_len_mean']} слов, разброс CV={m['sentence_len_cv']}; "
@@ -555,7 +565,8 @@ def render(report: dict, path: str) -> str:
             out.append(f"  [{'КРАСНЫЙ' if sev == 'red' else 'жёлтый'}] {msg}")
     else:
         lim = report.get("limits", {})
-        ok = "служебных реплик нет, технических следов нет, плейсхолдеров нет"
+        ok = ("технических следов нет, плейсхолдеров нет" if report.get("chat")
+              else "служебных реплик нет, технических следов нет, плейсхолдеров нет")
         parts = []
         if "max_chars" in lim:
             parts.append(f"{fmt_int(m['chars_with_spaces'])} знаков")
@@ -627,6 +638,8 @@ def main() -> int:
     ap.add_argument("--strict", action="store_true", help="код выхода 1 при любом красном сигнале, включая стилевые")
     ap.add_argument("--fail-on-blocking", action="store_true",
                     help="код выхода 1 только при непройденной обязательной проверке; стилевые сигналы на код не влияют")
+    ap.add_argument("--chat", action="store_true",
+                    help="текст — сообщение в чат, а не документ: обращение и реплики чата не блокируют сдачу")
     ap.add_argument("--max-chars", type=non_negative_int, metavar="N", help="лимит знаков с пробелами; превышение — обязательная красная проверка")
     ap.add_argument("--max-words", type=non_negative_int, metavar="N", help="лимит слов; превышение — обязательная красная проверка")
     ap.add_argument("--min-words", type=non_negative_int, metavar="N", help="минимум слов; недобор — обязательная красная проверка")
@@ -648,7 +661,7 @@ def main() -> int:
     elif args.skip_quotes:
         text = re.sub(r"(?m)^\s*>.*$", _blank, raw)
     report = analyze(text, genre=args.genre, raw_text=raw, max_chars=args.max_chars,
-                     max_words=args.max_words, min_words=args.min_words, layers=layers)
+                     max_words=args.max_words, min_words=args.min_words, layers=layers, chat=args.chat)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

@@ -146,7 +146,8 @@ python3 -I -B skills/russian-text-craft/scripts/ru_text_check.py tests/fixtures/
 Ожидаемый код **0**: в образце есть красные стилевые сигналы, но обязательные проверки пройдены.
 Слово для лимита — всё между пробелами, где есть буква или цифра; полное правило счёта — в `--help`.
 
-Версия checker — 2.3.0. Разбор находок: [editorial-triage](skills/russian-text-craft/references/editorial-triage.md);
+Версия checker — 2.4.0. Сообщение в чат проверяйте с `--chat`: обращение там не блокирует сдачу.
+Разбор находок: [editorial-triage](skills/russian-text-craft/references/editorial-triage.md);
 проверка, подтверждает ли источник утверждение: [source-verification](skills/russian-text-craft/references/source-verification.md);
 оценка качества навыков: [evaluation-protocol](skills/russian-text-craft/references/evaluation-protocol.md).
 Наличие этих файлов и успешный CLI-тест не подтверждают их применение моделью.
@@ -183,7 +184,7 @@ def platform_files(source: dict[str, bytes], platform: dict) -> dict[str, bytes]
         result['skills/' + relative] = data
     for name in ('LICENSE', 'CREDITS.md', 'scripts/install.py', 'tests/test_bundle.py',
                  'tests/test_checker.py', 'tests/fixtures/positive.txt', 'tests/fixtures/false-positive.md',
-                 'evidence/baseline.json', 'evidence/runtime.json', 'evidence/eval-2.3.0.json',
+                 'evidence/baseline.json', 'evidence/runtime.json', 'evidence/eval-2.3.0.json', 'evidence/eval-2.4.0.json',
                  'docs/install.md', 'docs/platforms.md', 'docs/audit.md', 'docs/verification.md'):
         result[name] = source[name]
     result['README.md'] = bundle_readme(platform)

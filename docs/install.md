@@ -4,14 +4,14 @@
 
 ## Получение пакетов
 
-Откройте **Releases** этого репозитория и выберите актуальный тег. Для ядра и checker 2.3.0 — `v2.3.0`.
+Откройте **Releases** этого репозитория и выберите актуальный тег. Для ядра и checker 2.4.0 — `v2.4.0`.
 Скачайте `SHA256SUMS` и нужный `writing-ru-<платформа>.zip`: платформы — `openclaw`, `codex`,
 `claude-code`, `pi`, `oh-my-pi`. Не смешивайте файлы разных релизов.
 
 Через GitHub CLI из отдельной пустой папки, указав адрес репозитория в `REPO`:
 
 ```bash
-TAG=v2.3.0
+TAG=v2.4.0
 gh release download "$TAG" --repo "$REPO" --dir download
 (cd download && sha256sum -c SHA256SUMS)
 ```
