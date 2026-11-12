@@ -77,7 +77,7 @@ class CliTests(unittest.TestCase):
         self.assertIn('Обязательно перед сдачей:', p.stdout)
         self.assertNotIn('Обязательные проверки пройдены', p.stdout)
         p = self.cli('-', '--max-chars', '100', text='Кот спит.')
-        self.assertIn('Обязательные проверки пройдены: служебных реплик нет, плейсхолдеров нет, объём 9 знаков в пределах лимита', p.stdout)
+        self.assertIn('Обязательные проверки пройдены: служебных реплик нет, технических следов нет, плейсхолдеров нет, объём 9 знаков в пределах лимита', p.stdout)
         p = self.cli('-', text='Кот спит.')
         self.assertIn('плейсхолдеров нет.', p.stdout)
         self.assertNotIn('объём', p.stdout.split('Стилевые')[0])
@@ -118,6 +118,68 @@ class CliTests(unittest.TestCase):
         self.assertTrue(report['blocking'])
         self.assertTrue(any('Служебные реплики' in m for _, m in report['mandatory']))
         self.assertFalse(any('Служебные реплики' in m for _, m in report['style']))
+
+    def test_fail_on_blocking_ignores_style_red_but_strict_does_not(self):
+        fixture = ROOT / 'tests/fixtures/positive.txt'
+        self.assertEqual(self.cli(fixture, '--strict').returncode, 1)
+        p = self.cli(fixture, '--fail-on-blocking', '--json')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        report = json.loads(p.stdout)
+        self.assertTrue(report['red'])
+        self.assertFalse(report['blocking'])
+        self.assertEqual(self.cli('-', '--fail-on-blocking', text='Босс, вот текст письма.').returncode, 1)
+        self.assertEqual(self.cli('-', '--fail-on-blocking', '--max-words', '1', text='Кот спит.').returncode, 1)
+        self.assertEqual(self.cli('-', '--fail-on-blocking', '--strict', text='Кот спит.').returncode, 0)
+
+    def test_tech_marker_blocks_plain_text_with_place_and_type(self):
+        p = self.cli('-', '--json', '--fail-on-blocking', text='Кот спит.\nРезультат подтверждён. contentReference[oaicite:1]')
+        self.assertEqual(p.returncode, 1, p.stderr)
+        report = json.loads(p.stdout)
+        hit = [f for f in report['findings'] if f['group'] == 'tech_leak']
+        self.assertEqual([(f['line'], f['match'], f['where']) for f in hit], [(2, 'contentReference[oaicite:1]', 'text')])
+        message = ' '.join(m for _, m in report['mandatory'])
+        self.assertIn('стр. 2', message)
+        self.assertIn('contentReference[oaicite:1]', message)
+        self.assertNotRegex(p.stdout.lower(), r'написан\w* (ии|нейросет)|сгенерирован')
+
+    def test_documented_marker_example_in_markdown_code_does_not_block(self):
+        md = ('# Справка\n\nМаркер `contentReference[oaicite:1]` остаётся после вставки из чата.\n\n'
+              '```text\nciteturn0search0\n```\n')
+        p = self.cli('-', '--markdown', '--json', '--fail-on-blocking', '--strict', '--genre', 'technical', text=md)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        report = json.loads(p.stdout)
+        self.assertFalse(report['blocking'])
+        self.assertEqual({(f['line'], f['where']) for f in report['findings'] if f['group'] == 'tech_leak'},
+                         {(3, 'code'), (6, 'code')})
+        self.assertEqual(len(report['notes']), 1)
+        self.assertIn('не блокируют', report['notes'][0])
+        # Тот же маркер вне кода — уже мусор.
+        p = self.cli('-', '--markdown', '--json', '--fail-on-blocking', text='Вывод подтверждён contentReference[oaicite:1].')
+        self.assertEqual(p.returncode, 1)
+
+    def test_hidden_comment_leak_blocks_and_draft_note_is_yellow(self):
+        md = 'Текст публикации.\n\n<!-- Если хотите, могу подготовить ещё вариант. -->\n'
+        p = self.cli('-', '--markdown', '--json', '--fail-on-blocking', text=md)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        report = json.loads(p.stdout)
+        self.assertTrue(any('скрытом HTML-комментарии' in m and 'стр. 3' in m for _, m in report['mandatory']))
+        self.assertEqual([f['where'] for f in report['findings'] if f['group'] == 'agent_leak'], ['comment'])
+        md = 'Текст публикации.\n\n<!-- TODO: добавить таблицу -->\n<!-- будущее уже здесь -->\n'
+        p = self.cli('-', '--markdown', '--json', '--fail-on-blocking', text=md)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        report = json.loads(p.stdout)
+        self.assertFalse(report['blocking'])
+        self.assertTrue(any(s == 'yellow' and 'HTML-комментариях' in m for s, m in report['style']))
+        self.assertEqual({f['group'] for f in report['findings']}, {'placeholder'})
+
+    def test_chat_tracking_parameter_in_link_blocks_ordinary_utm_does_not(self):
+        md = 'Источник: [отчёт](https://example.org/report?utm_source=chatgpt.com).\n'
+        report = json.loads(self.cli('-', '--markdown', '--json', text=md).stdout)
+        self.assertTrue(report['blocking'])
+        md = 'Источник: [отчёт](https://example.org/report?utm_source=newsletter) и работы [1, 2].\n'
+        report = json.loads(self.cli('-', '--markdown', '--json', text=md).stdout)
+        self.assertFalse(report['blocking'])
+        self.assertEqual(report['findings'], [])
 
     def test_stdin_and_markdown_flag(self):
         p = self.cli('-', '--json', '--markdown', text='Кот спит. `В современном мире` — это код.')
@@ -211,6 +273,87 @@ class AnalyzeTests(unittest.TestCase):
         self.assertTrue(report['red'])
         self.assertIn('agent_leak', groups(report))
 
+
+    def test_known_tech_markers(self):
+        markers = (':contentReference[oaicite:0]{index=0}', 'contentReference[oaicite:16]', '[oai_citation:0‡example.org]',
+                   'citeturn0search0', 'turn0image4', 'citeturn1file0', '({"attribution":{"attributableIndex":"1009-1"}})',
+                   '[cite_start]', '[cite: 2, 6]', '[span_1](start_span)', '<grok-card data-id="e8ff4f">',
+                   'grok_render_citation_card_json', '【85†L261-269】', 'attached_file:1', 'ppl-ai-file-upload',
+                   'https://example.org/?utm_source=openai', 'https://example.org/?a=1&utm_source=copilot.com',
+                   'https://example.org/?referrer=grok.com')
+        for marker in markers:
+            with self.subTest(marker=marker):
+                report = checker.analyze('Вывод подтверждён ' + marker + ' и описан.')
+                found = [f for f in report['findings'] if f['group'] == 'tech_leak']
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(report['blocking'])
+        for clean in ('В работах [1, 2] метод описан.', 'Функция return0 вызвана.', 'Адрес example.org/?utm_source=newsletter.',
+                      'Значение utm_source=chatgpt.company не служебное.', 'Сноска † и скобки 【так】.'):
+            with self.subTest(clean=clean):
+                self.assertNotIn('tech_leak', groups(checker.analyze(clean)))
+
+    def test_word_count_rule(self):
+        cases = {
+            'В 2024 году — 17 случаев и 3 проверки.': (8, 9),
+            'Бюджет 10 000 рублей.': (3, 3),
+            'Бюджет 10\u00a0000 рублей и 1 250 000 знаков.': (6, 6),
+            'Рост 3,5 % за 2020–2024 годы.': (5, 6),
+            'А. С. Пушкин и кто-то из научно-технического совета.': (8, 8),
+            'Пункты 5 200 и 2024 123 разные.': (6, 6),
+            '— № %': (0, 3),
+            '': (0, 0),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                m = checker.analyze(text)['metrics']
+                self.assertEqual((m['words'], m['whitespace_tokens']), expected)
+        self.assertEqual(checker.analyze('В 2024 году — 17 случаев и 3 проверки.')['metrics']['lexical_words'], 5)
+
+    def test_word_count_markdown_excludes_markup_code_links_and_list_numbers(self):
+        md = ('# Итог\n\n1. Первый шаг\n2. Второй шаг: `retry_count = 3`\n\n'
+              'См. [отчёт за 2024 год](https://example.org/very/long/path).\n\n```\nкод не считается\n```\n'
+              '<!-- комментарий не считается -->\n')
+        layers = checker.markdown_layers(md)
+        m = checker.analyze(layers['prose'], raw_text=md, layers=layers)['metrics']
+        # Итог | Первый шаг | Второй шаг: | См. отчёт за 2024 год
+        self.assertEqual(m['words'], 10)
+        report = checker.analyze(layers['prose'], raw_text=md, layers=layers, max_words=9)
+        self.assertEqual(report['mandatory'], [('red', 'Объём: 10 слов при лимите 9 (+1)')])
+
+    def test_layers_keep_length_and_line_numbers(self):
+        md = 'Текст `код` тут.\n<!-- скрыто\nвторая -->\n```\nблок\n```\n[ссылка](https://example.org/x)\n'
+        layers = checker.markdown_layers(md)
+        for name, layer in layers.items():
+            with self.subTest(layer=name):
+                self.assertEqual(len(layer), len(md))
+                self.assertEqual(layer.count('\n'), md.count('\n'))
+        self.assertEqual(layers['prose'], checker.strip_markdown(md))
+        self.assertIn('скрыто', layers['comments'])
+        self.assertNotIn('скрыто', layers['prose'] + layers['visible'] + layers['code'])
+        self.assertIn('код', layers['code'])
+        self.assertIn('блок', layers['code'])
+        self.assertIn('example.org', layers['visible'])
+        self.assertNotIn('example.org', layers['prose'])
+
+    def test_short_text_gets_no_density_verdicts(self):
+        for text in ('Текст публикации.', 'Квадрат является прямоугольником. Круг является плоской фигурой.',
+                     'В 2024 году — 17 случаев и 3 проверки.'):
+            with self.subTest(text=text):
+                self.assertEqual(checker.analyze(text)['style'], [])
+
+    def test_style_messages_are_reading_questions_not_orders(self):
+        monotone = ' '.join('Кот видит дом и спит у окна там.' for _ in range(8))
+        copula = ' '.join('Этот объект является важной частью нашей общей системы.' for _ in range(8))
+        nominals = ' '.join(f'Кот видит {w} и спит.' for w in
+                            ['проведения', 'оценивания', 'выполнения', 'рассмотрения', 'согласования', 'обсуждения',
+                             'заключения', 'развития', 'исполнения', 'утверждения', 'распределения', 'планирования'])
+        messages = [m for text in (monotone, copula, nominals) for _, m in checker.analyze(text)['style']]
+        joined = ' '.join(messages)
+        self.assertIn('мешает ли однообразие', joined)
+        self.assertIn('«Является»: 8', joined)
+        self.assertIn('не спрятаны ли за ними действие', joined)
+        for order in ('Добавь короткие', 'Переведи часть в глаголы', 'Замени тире'):
+            self.assertNotIn(order, joined)
 
     def test_narrowed_patterns(self):
         report = checker.analyze('Данные лежат в файле. Журнал хранит вызовы инструментов и вызовы API.')

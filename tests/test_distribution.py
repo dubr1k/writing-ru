@@ -67,7 +67,8 @@ class DistributionTests(unittest.TestCase):
                         self.assertIn('/'.join(parts), names, (name, link))
                 for required in ('LICENSE', 'CREDITS.md', 'README.md', 'scripts/install.py',
                                  'tests/test_checker.py', 'tests/test_bundle.py',
-                                 'skills/russian-text-craft/references/editorial-triage.md'):
+                                 'skills/russian-text-craft/references/editorial-triage.md',
+                                 'skills/russian-text-craft/references/source-verification.md'):
                     self.assertIn(prefix + required, names)
 
     def test_current_core_references_and_checker_in_every_bundle(self):
@@ -77,10 +78,13 @@ class DistributionTests(unittest.TestCase):
                 core = prefix + 'skills/russian-text-craft/'
                 text = z.read(core + 'SKILL.md').decode()
                 readme = z.read(prefix + 'README.md').decode()
-                for flag in ('--max-chars', '--max-words', '--min-words'):
+                for flag in ('--max-chars', '--max-words', '--min-words', '--fail-on-blocking'):
                     self.assertIn(flag, text)
                     self.assertIn(flag, readme)
-                for reference in ('editorial-triage.md', 'evaluation-protocol.md'):
+                self.assertIn('Версия checker — 2.3.0', readme)
+                for section in ('## Источники и утверждения', '### Содержание абзацев'):
+                    self.assertIn(section, text)
+                for reference in ('editorial-triage.md', 'evaluation-protocol.md', 'source-verification.md'):
                     relative = 'russian-text-craft/references/' + reference
                     self.assertEqual(z.read(prefix + 'skills/' + relative),
                                      (ROOT / 'skills/writing-ru' / relative).read_bytes())
@@ -100,6 +104,16 @@ class DistributionTests(unittest.TestCase):
                 self.assertTrue(report['blocking'])
                 self.assertIn('mandatory', report)
                 self.assertIn('style', report)
+                self.assertEqual(report['version'], '2.3.0')
+                gate = [sys.executable, '-I', '-B', str(destination / core / 'scripts/ru_text_check.py'),
+                        '-', '--markdown', '--genre', 'technical', '--fail-on-blocking', '--json']
+                leaked = subprocess.run(gate, input='Вывод подтверждён contentReference[oaicite:1].',
+                                        text=True, capture_output=True)
+                self.assertEqual(leaked.returncode, 1, leaked.stderr)
+                example = subprocess.run(gate, input='Пример маркера: `contentReference[oaicite:1]`.',
+                                         text=True, capture_output=True)
+                self.assertEqual(example.returncode, 0, example.stdout + example.stderr)
+                self.assertFalse(json.loads(example.stdout)['blocking'])
 
     def test_reference_whitelists_match_actual_public_references(self):
         spec = importlib.util.spec_from_file_location('installer_reference_check', ROOT / 'scripts/install.py')

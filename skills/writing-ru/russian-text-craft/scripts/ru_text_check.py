@@ -3,17 +3,40 @@
 """Редакторские сигналы для русского текста: шаблонные обороты, служебные следы, ритм.
 
 Только стандартная библиотека, Python 3.10+. Вход: .txt, .md, .docx или «-» (stdin).
-Выход: отчёт на русском; --json — машинный вывод; --strict — код 1 при красном сигнале.
-Коды: 0 — анализ выполнен; 1 — --strict и есть красный сигнал; 2 — ошибка чтения или разбора.
+Выход: отчёт на русском; --json — машинный вывод.
+Коды: 0 — анализ выполнен; 1 — сработал выбранный режим отказа (см. ниже); 2 — ошибка чтения
+или разбора. Режимы отказа: --fail-on-blocking — код 1 только при непройденной обязательной
+проверке (для автоматической приёмки); --strict — код 1 при любом красном сигнале, включая стилевые.
 
 Отчёт разделён на две части.
-«Обязательно перед сдачей» — блокирующие проверки: служебные реплики агента, незаполненные
-плейсхолдеры, объём вне заданных пределов. «Стилевые сигналы» — всё остальное: ритм, шаблонные
-обороты, отвлечённые существительные и прочие советы по правке.
-Объём проверяется только если заданы --max-chars N (знаки с пробелами), --max-words N
-или --min-words N; выход за предел — красная обязательная проверка.
+«Обязательно перед сдачей» — блокирующие проверки: служебные реплики агента, технические следы
+вставки из чат-интерфейса (маркеры цитирования вроде contentReference[oaicite:1], служебные
+параметры ссылок), незаполненные плейсхолдеры, объём вне заданных пределов.
+«Стилевые сигналы» — места для перечитывания: ритм, шаблонные обороты, плотность отвлечённых
+существительных. Это вопросы к тексту, а не оценка его качества: метрики считают форму, смысл
+проверяется чтением.
+
+Слои Markdown. Исходник делится на видимый текст, HTML-комментарии и код. Стилевой анализ идёт
+по видимому тексту без кода, адресов ссылок и комментариев. Технические следы ищутся в видимом
+тексте вместе с адресами ссылок и в комментариях: скрытый комментарий уходит адресату вместе
+с файлом. Служебная реплика в комментарии блокирует сдачу, черновая пометка — жёлтый сигнал.
+Маркер внутри кода (блок или `строка`) считается документированным примером: он показан
+в разделе «Справочно» и сдачу не блокирует. Комментарии и примечания DOCX не читаются.
+
+Объём проверяется только если заданы --max-chars N, --max-words N или --min-words N.
+Правило счёта слов: слово — последовательность знаков между пробелами, в которой есть буква
+или цифра. Дефисное слово, число («2024», «3,5»), число с разделителями разрядов («10 000»),
+диапазон («2020–2024»), адрес — по одному слову; инициалы «А. С.» — два; отдельно стоящие тире,
+«%», «№» и прочие знаки — ноль. В Markdown не считаются код, адреса ссылок, HTML-комментарии
+и номера пунктов нумерованного списка; текст ссылки считается. Знаки с пробелами считаются
+по исходному тексту как есть, с разметкой; для .docx — по извлечённому тексту абзацев.
+Поле whitespace_tokens — все последовательности между пробелами, включая отдельные тире:
+ориентир, если получатель считает объём текстовым редактором.
+
 В JSON: mandatory и style (списки пар [severity, сообщение]), flags — их объединение,
-red — есть ли красный сигнал в любом разделе, blocking — есть ли непройденная обязательная проверка.
+red — есть ли красный сигнал в любом разделе, blocking — есть ли непройденная обязательная
+проверка, notes — справочные строки, которые ничего не блокируют. У каждой находки поле where:
+text, comment или code.
 
 Это эвристики для ручной проверки, а не определение авторства или ИИ-генерации.
 """
@@ -28,7 +51,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # ---------------------------------------------------------------- стоп-фразы
 # Группы соответствуют references/ru-ai-patterns.md. Шаблоны без учёта регистра.
@@ -122,6 +145,29 @@ STOP_GROUPS: dict[str, tuple[str, list[str]]] = {
     ]),
 }
 
+# Технические следы вставки из чат-интерфейса: внутренняя разметка цитирования и служебные
+# параметры ссылок, которые интерфейс не превратил в текст. Список — известные маркеры, он
+# неполон и устаревает. Находка говорит только о том, что в документе остался мусор и что
+# утверждение рядом нужно сверить с источником; автора она не определяет.
+TECH_TITLE = "Технические следы вставки из чат-интерфейса"
+TECH_LEAK = re.compile("|".join([
+    r":?contentReference\[oaicite:\d+\](?:\{index=\d+\})?",
+    r"\[?oai_citation(?::\d+)?",
+    r"\boaicite\b",
+    r"(?<![A-Za-z])(?:cite|i)?turn\d+(?:search|image|news|file|view)\d+",
+    r"attributableIndex",
+    r"\[cite_start\]",
+    r"\[cite:\s*\d+(?:\s*,\s*\d+)*\]",
+    r"\[span_\d+\]\((?:start|end)_span\)",
+    r"grok_render_citation_card_json",
+    r"</?grok[-_]card\b",
+    r"【[^】\n]{0,40}†[^】\n]{0,40}】",
+    r"\battached_file:\d+",
+    r"ppl-ai-file-upload",
+    r"[?&]utm_source=(?:chatgpt\.com|openai|copilot\.com)(?![\w.-])",
+    r"[?&]referrer=grok\.com(?![\w.-])",
+]), re.I)
+
 # Три совпадения из этих групп дают красный сигнал (не вердикт).
 PRIORITY_GROUPS = {"zachin", "znachimost", "itog", "ssylki", "hedging"}
 # Одно совпадение из этих групп — уже красный сигнал: такое не должно уйти адресату.
@@ -168,6 +214,10 @@ HYPHEN_AS_DASH = re.compile(r"(?<=[А-Яа-яЁё,])\s-\s(?=[А-Яа-яЁё])")
 RHETORIC = re.compile(r"\?\s+(Это значит|Ответ|Потому что|Да,|Нет,|Конечно|Очевидно)", re.I)
 SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+(?=[«\"A-ZА-ЯЁ0-9])")
 WORD = re.compile(r"[А-Яа-яЁёA-Za-z][\w-]*")
+# Слово для счёта объёма: всё между пробелами, где есть буква или цифра (см. описание модуля).
+COUNT_WORD = re.compile(r"\S*[^\W_]\S*")
+DIGIT_GROUPS = re.compile(r"(?<![\d,.])\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?![\d])")
+MD_ORDERED_MARKER = re.compile(r"(?m)^(\s*(?:>\s*)*)\d+[.)](?=\s)")
 
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -215,30 +265,74 @@ def _blank(m: re.Match) -> str:
     return re.sub(r"[^\n]", " ", m.group(0))
 
 
-def strip_markdown(text: str, skip_quotes: bool = False) -> str:
+def _keep(text: str, spans: list[tuple[int, int]]) -> str:
+    """Оставить только указанные участки, остальное заменить пробелами (строки не съезжают)."""
+    out, pos = [], 0
+    for a, b in spans:
+        out.append(re.sub(r"[^\n]", " ", text[pos:a]))
+        out.append(text[a:b])
+        pos = b
+    out.append(re.sub(r"[^\n]", " ", text[pos:]))
+    return "".join(out)
+
+
+def _overlay(a: str, b: str) -> str:
+    """Склеить два слоя одинаковой длины: непробельный знак берётся из любого."""
+    return "".join(y if x in " " else x for x, y in zip(a, b))
+
+
+def markdown_layers(text: str, skip_quotes: bool = False) -> dict[str, str]:
+    """Разделить Markdown на слои одинаковой длины с сохранением номеров строк.
+
+    prose — видимый текст без кода, адресов ссылок и HTML-комментариев (стилевой анализ, объём);
+    visible — видимый текст с адресами ссылок, но без кода и комментариев (технические следы);
+    comments — только HTML-комментарии; code — только код: блоки и `строки`.
+    """
     # Закрывающий fence той же породы, не короче открывающего.
     # Незакрытый блок продолжается до EOF; номера строк сохраняются.
-    out = []
+    out, code = [], []
     fence = None
     for line in text.splitlines(keepends=True):
         marker = FENCE.match(line.rstrip("\r\n"))
+        blank = re.sub(r"[^\r\n]", " ", line)
         if fence is not None:
-            out.append(re.sub(r"[^\r\n]", " ", line))
+            out.append(blank)
+            code.append(line)
             if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
                 fence = None
         elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
             fence = marker[1]
-            out.append(re.sub(r"[^\r\n]", " ", line))
+            out.append(blank)
+            code.append(line)
         else:
             out.append(line)
-    text = "".join(out)
+            code.append(blank)
+    text, code_layer = "".join(out), "".join(code)
+    comments = _keep(text, [m.span() for m in HTML_COMMENT.finditer(text)])
+    comments = re.sub(r"<!--|-->", lambda m: " " * len(m.group(0)), comments)  # для шаблонов с началом строки
     text = HTML_COMMENT.sub(_blank, text)
+    code_layer = _overlay(code_layer, _keep(text, [m.span() for m in INLINE_CODE.finditer(text)]))
     text = INLINE_CODE.sub(_blank, text)
+    visible = text
     text = MD_LINK_TARGET.sub(lambda m: "](" + " " * len(m.group(1)) + ")", text)
     text = URL.sub(_blank, text)
     if skip_quotes:
         text = re.sub(r"(?m)^\s*>.*$", _blank, text)
-    return text
+        visible = re.sub(r"(?m)^\s*>.*$", _blank, visible)
+    return {"prose": text, "visible": visible, "comments": comments, "code": code_layer}
+
+
+def strip_markdown(text: str, skip_quotes: bool = False) -> str:
+    """Видимый текст Markdown без кода, адресов ссылок и HTML-комментариев."""
+    return markdown_layers(text, skip_quotes=skip_quotes)["prose"]
+
+
+def count_words(text: str, markdown: bool = False) -> tuple[int, int]:
+    """Вернуть (слова по правилу модуля, все токены между пробелами)."""
+    if markdown:
+        text = MD_ORDERED_MARKER.sub(lambda m: m.group(1), text)
+    joined = DIGIT_GROUPS.sub(lambda m: re.sub(r"[ \u00a0\u202f]", "", m.group(0)), text)
+    return len(COUNT_WORD.findall(joined)), len(joined.split())
 
 
 # ---------------------------------------------------------------- анализ
@@ -264,17 +358,27 @@ def fmt_int(n: int) -> str:
     return f"{n:,}".replace(",", " ")
 
 
+def _context(line: str, m: re.Match) -> str:
+    start, end = max(0, m.start() - 35), min(len(line), m.end() + 35)
+    return line[start:end].strip()
+
+
 def analyze(text: str, genre: str = "general", raw_text: str | None = None,
             max_chars: int | None = None, max_words: int | None = None,
-            min_words: int | None = None) -> dict:
+            min_words: int | None = None, layers: dict[str, str] | None = None) -> dict:
+    """text — видимый текст для стилевого анализа; layers — слои Markdown (markdown_layers).
+
+    Без layers весь text считается видимым: технические следы в нём блокируют сдачу.
+    """
     g = GENRES[genre]
     raw = text if raw_text is None else raw_text
     lines = text.splitlines()
     paras = split_paragraphs(text)
     sentences = [s for p in paras for s in split_sentences(p)]
     words = WORD.findall(text)
-    n_words = len(words)
-    denom = n_words or 1
+    lexical = len(words)
+    denom = lexical or 1
+    n_words, ws_tokens = count_words(text, markdown=layers is not None)
     sent_lens = [len(WORD.findall(s)) for s in sentences]
     para_lens = [len(WORD.findall(p)) for p in paras]
 
@@ -284,10 +388,26 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
             rx = re.compile(pat, re.I | re.M)
             for i, line in enumerate(lines, 1):
                 for m in rx.finditer(line):
-                    start, end = max(0, m.start() - 35), min(len(line), m.end() + 35)
                     findings.append({"group": key, "title": title, "line": i,
-                                     "match": m.group(0).strip(), "context": line[start:end].strip(),
-                                     "quiet": key in g["quiet"]})
+                                     "match": m.group(0).strip(), "context": _context(line, m),
+                                     "quiet": key in g["quiet"], "where": "text"})
+
+    # Исходник: технические следы в видимом тексте (с адресами ссылок), комментариях и коде.
+    def scan(layer: str, where: str, rules: list[tuple[str, str, re.Pattern]]) -> None:
+        for i, line in enumerate(layer.splitlines(), 1):
+            for key, title, rx in rules:
+                for m in rx.finditer(line):
+                    findings.append({"group": key, "title": title, "line": i,
+                                     "match": m.group(0).strip(), "context": _context(line, m),
+                                     "quiet": False, "where": where})
+
+    tech = [("tech_leak", TECH_TITLE, TECH_LEAK)]
+    scan(layers["visible"] if layers else text, "text", tech)
+    if layers:
+        hidden = tech + [(key, STOP_GROUPS[key][0], re.compile(pat, re.I | re.M))
+                         for key in ("agent_leak", "placeholder") for pat in STOP_GROUPS[key][1]]
+        scan(layers["comments"], "comment", hidden)
+        scan(layers["code"], "code", tech)
 
     nominal = [w for w in words if len(w) > 6 and is_nominal(w)]
     copula = COPULA.findall(text)
@@ -305,7 +425,8 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
     mid_share = (sum(1 for n in sent_lens if 12 <= n <= 24) / len(sent_lens)) if sent_lens else 0.0
 
     metrics = {
-        "words": n_words, "sentences": len(sentences), "paragraphs": len(paras),
+        "words": n_words, "lexical_words": lexical, "whitespace_tokens": ws_tokens,
+        "sentences": len(sentences), "paragraphs": len(paras),
         "chars_with_spaces": len(raw.strip()), "chars_no_spaces": len(re.sub(r"\s", "", raw)),
         "sentence_len_mean": round(statistics.mean(sent_lens), 1) if sent_lens else 0,
         "sentence_len_cv": round(cv(sent_lens), 2),
@@ -324,11 +445,36 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
     }
 
     # Обязательные проверки сдачи: блокируют отправку.
+    def where_lines(hits: list[dict]) -> str:
+        return ", ".join(str(h["line"]) for h in hits[:8]) + ("…" if len(hits) > 8 else "")
+
+    def kinds(hits: list[dict]) -> str:
+        seen = list(dict.fromkeys(h["match"] for h in hits))
+        return "; ".join(seen[:4]) + ("; …" if len(seen) > 4 else "")
+
     mandatory: list[tuple[str, str]] = []
+    notes: list[str] = []
+    hidden_notes: list[tuple[str, str]] = []
     for key in sorted(IMMEDIATE_RED):
-        hits = [f for f in findings if f["group"] == key]
+        hits = [f for f in findings if f["group"] == key and f["where"] == "text"]
         if hits:
-            mandatory.append(("red", f"{STOP_GROUPS[key][0]}: {len(hits)} (стр. {', '.join(str(h['line']) for h in hits[:8])}). Убери до отправки."))
+            mandatory.append(("red", f"{STOP_GROUPS[key][0]}: {len(hits)} (стр. {where_lines(hits)}). Убери до отправки."))
+        hits = [f for f in findings if f["group"] == key and f["where"] == "comment"]
+        if hits and key == "agent_leak":
+            mandatory.append(("red", f"Служебные реплики агента в скрытом HTML-комментарии: {len(hits)} (стр. {where_lines(hits)}). "
+                                     "Комментарий уйдёт адресату вместе с файлом — убери."))
+        elif hits:
+            hidden_notes.append(("yellow", f"Черновые пометки в HTML-комментариях: {len(hits)} (стр. {where_lines(hits)}). "
+                                           "Проверь, должны ли они уйти адресату вместе с файлом."))
+    for where, label in (("text", ""), ("comment", " в скрытом HTML-комментарии")):
+        hits = [f for f in findings if f["group"] == "tech_leak" and f["where"] == where]
+        if hits:
+            mandatory.append(("red", f"{TECH_TITLE}{label}: {len(hits)} (стр. {where_lines(hits)}): {kinds(hits)}. "
+                                     "Убери маркер и сверь утверждение рядом с источником."))
+    hits = [f for f in findings if f["group"] == "tech_leak" and f["where"] == "code"]
+    if hits:
+        notes.append(f"Технические маркеры внутри кода или примера: {len(hits)} (стр. {where_lines(hits)}). "
+                     "Сдачу не блокируют; убедись, что это намеренный пример.")
     chars = metrics["chars_with_spaces"]
     if max_chars is not None and chars > max_chars:
         mandatory.append(("red", f"Объём: {fmt_int(chars)} знаков с пробелами при лимите {fmt_int(max_chars)} (+{fmt_int(chars - max_chars)})"))
@@ -341,26 +487,29 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
     # Стилевые сигналы: советы по правке.
     flags: list[tuple[str, str]] = []
     if g["cv_red"] is not None and len(sent_lens) >= 6 and metrics["sentence_len_cv"] < g["cv_red"]:
-        flags.append(("red", f"Монотонный ритм: разброс длины предложений низкий (CV={metrics['sentence_len_cv']}, средняя {metrics['sentence_len_mean']} слов). Добавь короткие и длинные."))
+        flags.append(("red", f"Длина предложений почти одинакова (CV={metrics['sentence_len_cv']}, средняя {metrics['sentence_len_mean']} слов). Перечитай подряд: мешает ли однообразие читать? В перечне, инструкции и определениях ровный ритм — норма."))
     elif g["cv_red"] is None and len(sent_lens) >= 6 and metrics["sentence_len_cv"] < 0.3:
-        flags.append(("yellow", f"Ровный ритм (CV={metrics['sentence_len_cv']}); для этого жанра допустимо, но проверь читаемость."))
+        flags.append(("yellow", f"Ровный ритм (CV={metrics['sentence_len_cv']}); для этого жанра это норма — правь, только если читать трудно."))
     if len(sent_lens) >= 6 and mid_share > 0.8:
-        flags.append(("yellow", f"{int(mid_share * 100)} % предложений длиной 12–24 слова — проверь разнообразие ритма."))
+        flags.append(("yellow", f"{int(mid_share * 100)} % предложений длиной 12–24 слова. Проверь, не теряется ли главное в одинаковых фразах."))
     if len(para_lens) >= 4 and metrics["paragraph_len_cv"] < 0.3:
-        flags.append(("yellow", "Абзацы почти одинаковой длины."))
+        flags.append(("yellow", "Абзацы почти одинаковой длины. Проверь, не собраны ли они по одной схеме."))
+    # Плотность на коротком тексте ничего не значит: доли считаются от 40 слов, счётчики — от трёх случаев.
     nr = g["nominal_red"]
-    if metrics["nominal_per_100"] > nr:
-        flags.append(("red", f"Слова с суффиксами отвлечённых существительных: {metrics['nominal_per_100']} на 100 слов (порог жанра {nr}). Переведи часть в глаголы."))
+    if lexical < 40:
+        pass
+    elif metrics["nominal_per_100"] > nr:
+        flags.append(("red", f"Слова с суффиксами отвлечённых существительных: {metrics['nominal_per_100']} на 100 слов (порог жанра {nr}). Проверь, не спрятаны ли за ними действие и деятель; термины не трогай."))
     elif metrics["nominal_per_100"] > nr - 2:
-        flags.append(("yellow", f"Отвлечённые существительные: {metrics['nominal_per_100']} на 100 слов (порог жанра {nr})."))
-    if metrics["copula_per_100"] > g["copula"]:
-        flags.append(("yellow", f"«Является» встречается {len(copula)} раз. Замени тире, «это», «есть», где можно."))
+        flags.append(("yellow", f"Отвлечённые существительные: {metrics['nominal_per_100']} на 100 слов (порог жанра {nr}). Проверь цепочки, где неясно, кто что делает."))
+    if len(copula) >= 3 and metrics["copula_per_100"] > g["copula"]:
+        flags.append(("yellow", f"«Является»: {len(copula)}. В определении и официальной формуле связка уместна; проверь места, где она только удлиняет фразу."))
     if metrics["triads_per_1000"] > 6 and len(triads) >= 3:
-        flags.append(("yellow", f"Тройки «X, Y и Z»: {len(triads)}. Проверь, не ради ли симметрии."))
+        flags.append(("yellow", f"Тройки «X, Y и Z»: {len(triads)}. Проверь, все ли три элемента нужны по смыслу."))
     if len(opener_hits) >= 3:
         flags.append(("yellow", f"{len(opener_hits)} абзацев начинаются с формульного зачина ({'; '.join(o.split()[0] for o in opener_hits[:4])}…)."))
     if len(bold) > max(3, len(paras) // 2):
-        flags.append(("yellow", f"Жирный шрифт {len(bold)} раз — много для прозы."))
+        flags.append(("yellow", f"Жирный шрифт: {len(bold)}. Для прозы много; в инструкции и справке проверь, помогает ли он искать нужное."))
     if bold_lists:
         sev = "red" if g["bold_lists_red"] else "yellow"
         flags.append((sev, f"Список с жирными заголовками: {len(bold_lists)} пунктов. Уместно в инструкции, в прозе — признак шаблона."))
@@ -376,16 +525,17 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
         flags.append(("yellow", f"Дефис вместо тире между словами: {len(hyphen_dash)}. Нужно «—»."))
     if rhetoric:
         flags.append(("yellow", f"Риторический вопрос с немедленным ответом: {len(rhetoric)}."))
-    if metrics["em_dash_per_100"] > 2.5:
-        flags.append(("yellow", f"Тире {dashes} раз ({metrics['em_dash_per_100']} на 100 слов) — проверь, не ради ли «удара»."))
+    if dashes >= 3 and metrics["em_dash_per_100"] > 2.5:
+        flags.append(("yellow", f"Тире: {dashes} ({metrics['em_dash_per_100']} на 100 слов). Проверь, где тире держит смысл, а где стоит ради «удара»."))
     prio = [f for f in findings if f["group"] in PRIORITY_GROUPS and not f["quiet"]]
     if len(prio) >= 3:
-        flags.append(("red", f"Шаблонных оборотов из приоритетных групп: {len(prio)}."))
+        flags.append(("red", f"Шаблонных оборотов из приоритетных групп: {len(prio)}. Перечитай эти места: есть ли за оборотом мысль или факт."))
 
-    style = flags
+    style = flags + hidden_notes
     all_flags = mandatory + style
     return {"version": VERSION, "genre": genre, "metrics": metrics, "findings": findings,
             "limits": limits, "mandatory": mandatory, "style": style, "flags": all_flags,
+            "notes": notes,
             "red": any(s == "red" for s, _ in all_flags), "blocking": bool(mandatory)}
 
 
@@ -393,7 +543,7 @@ def analyze(text: str, genre: str = "general", raw_text: str | None = None,
 def render(report: dict, path: str) -> str:
     m = report["metrics"]
     out = [f"Проверка текста: {path} (жанр: {report['genre']})",
-           f"Слов {m['words']}, предложений {m['sentences']}, абзацев {m['paragraphs']}; "
+           f"Слов {m['words']} (токенов между пробелами {m['whitespace_tokens']}), предложений {m['sentences']}, абзацев {m['paragraphs']}; "
            f"знаков с пробелами {m['chars_with_spaces']}, без пробелов {m['chars_no_spaces']}.",
            f"Средняя длина предложения {m['sentence_len_mean']} слов, разброс CV={m['sentence_len_cv']}; "
            f"отвлечённых существительных {m['nominal_per_100']}/100; «является» {m['copula_count']}; троек {m['triads']}; "
@@ -405,7 +555,7 @@ def render(report: dict, path: str) -> str:
             out.append(f"  [{'КРАСНЫЙ' if sev == 'red' else 'жёлтый'}] {msg}")
     else:
         lim = report.get("limits", {})
-        ok = "служебных реплик нет, плейсхолдеров нет"
+        ok = "служебных реплик нет, технических следов нет, плейсхолдеров нет"
         parts = []
         if "max_chars" in lim:
             parts.append(f"{fmt_int(m['chars_with_spaces'])} знаков")
@@ -416,17 +566,23 @@ def render(report: dict, path: str) -> str:
         out.append(f"  Обязательные проверки пройдены: {ok}.")
     out.append("")
     if report["style"]:
-        out.append("Стилевые сигналы:")
+        out.append("Стилевые сигналы: места для перечитывания, не оценка качества.")
         for sev, msg in report["style"]:
             out.append(f"  [{'КРАСНЫЙ' if sev == 'red' else 'жёлтый'}] {msg}")
     else:
         out.append("Стилевые сигналы: нет.")
     out.append("")
+    if report.get("notes"):
+        out.append("Справочно:")
+        out.extend(f"  {n}" for n in report["notes"])
+        out.append("")
     if report["findings"]:
-        out.append(f"Шаблонные обороты ({len(report['findings'])}):")
+        out.append(f"Находки по строкам ({len(report['findings'])}):")
         by_group: dict[str, list[dict]] = {}
+        suffix = {"comment": " (в HTML-комментарии)", "code": " (в коде или примере — не блокирует)"}
         for f in report["findings"]:
-            by_group.setdefault(f["title"] + (" (для жанра — справочно)" if f["quiet"] else ""), []).append(f)
+            title = f["title"] + suffix.get(f.get("where", "text"), "")
+            by_group.setdefault(title + (" (для жанра — справочно)" if f["quiet"] else ""), []).append(f)
         for title, items in by_group.items():
             out.append(f"  {title} — {len(items)}")
             for f in items[:12]:
@@ -437,8 +593,9 @@ def render(report: dict, path: str) -> str:
     else:
         out.append("Шаблонных оборотов не найдено.")
         out.append("")
-    out.append("Скрипт не видит: отсутствие автора, выдуманные факты, пустые обобщения, переводной синтаксис. "
-               "Это проверяется чтением. Совпадения — повод перечитать, а не доказательство ИИ-генерации.")
+    out.append("Скрипт не видит: выдуманные факты, источник, который не подтверждает утверждение, пустые обобщения, "
+               "потерянные оговорки. Это проверяется чтением и сверкой с источниками. Совпадения и метрики — повод "
+               "перечитать, а не оценка качества и не доказательство ИИ-генерации.")
     return "\n".join(out)
 
 
@@ -455,15 +612,21 @@ def non_negative_int(value: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Редакторская проверка русского текста; не детектор ИИ. "
-                    "Отчёт: «Обязательно перед сдачей» (служебные реплики, плейсхолдеры, объём) "
-                    "и «Стилевые сигналы» (остальное).")
+                    "Отчёт: «Обязательно перед сдачей» (служебные реплики, технические следы вставки, "
+                    "плейсхолдеры, объём) и «Стилевые сигналы» (места для перечитывания).",
+        epilog="Счёт слов: слово — последовательность знаков между пробелами, в которой есть буква или цифра; "
+               "число с разделителями разрядов — одно слово; отдельные тире и знаки не считаются. "
+               "В Markdown не считаются код, адреса ссылок, HTML-комментарии и номера пунктов списка. "
+               "Знаки с пробелами — по исходному тексту вместе с разметкой.")
     ap.add_argument("path", help="файл .txt/.md/.docx или «-» для stdin")
     ap.add_argument("--genre", choices=sorted(GENRES), default="general", help="жанровые пороги (по умолчанию general)")
     ap.add_argument("--markdown", action="store_true", help="разбирать как Markdown (для stdin и файлов без .md)")
     ap.add_argument("--keep-code", action="store_true", help="не исключать код, ссылки и HTML-комментарии в Markdown")
     ap.add_argument("--skip-quotes", action="store_true", help="исключить цитаты (строки, начинающиеся с >)")
     ap.add_argument("--json", action="store_true", help="вывод в JSON")
-    ap.add_argument("--strict", action="store_true", help="код выхода 1 при красном сигнале, в том числе при выходе за объём")
+    ap.add_argument("--strict", action="store_true", help="код выхода 1 при любом красном сигнале, включая стилевые")
+    ap.add_argument("--fail-on-blocking", action="store_true",
+                    help="код выхода 1 только при непройденной обязательной проверке; стилевые сигналы на код не влияют")
     ap.add_argument("--max-chars", type=non_negative_int, metavar="N", help="лимит знаков с пробелами; превышение — обязательная красная проверка")
     ap.add_argument("--max-words", type=non_negative_int, metavar="N", help="лимит слов; превышение — обязательная красная проверка")
     ap.add_argument("--min-words", type=non_negative_int, metavar="N", help="минимум слов; недобор — обязательная красная проверка")
@@ -477,18 +640,22 @@ def main() -> int:
         print(f"Ошибка чтения {args.path}: {e}", file=sys.stderr)
         return 2
     text = raw
+    layers = None
     is_md = args.markdown or args.path.lower().endswith((".md", ".markdown"))
     if is_md and not args.keep_code:
-        text = strip_markdown(raw, skip_quotes=args.skip_quotes)
+        layers = markdown_layers(raw, skip_quotes=args.skip_quotes)
+        text = layers["prose"]
     elif args.skip_quotes:
         text = re.sub(r"(?m)^\s*>.*$", _blank, raw)
     report = analyze(text, genre=args.genre, raw_text=raw, max_chars=args.max_chars,
-                     max_words=args.max_words, min_words=args.min_words)
+                     max_words=args.max_words, min_words=args.min_words, layers=layers)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(render(report, args.path))
-    return 1 if (args.strict and report["red"]) else 0
+    if (args.strict and report["red"]) or (args.fail_on_blocking and report["blocking"]):
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
