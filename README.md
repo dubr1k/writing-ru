@@ -47,7 +47,7 @@
 | [ru-technical-docs](skills/writing-ru/ru-technical-docs/SKILL.md) | README, гайд, инструкция для людей и агентов, промпт, коммит |
 | [ru-agent-report](skills/writing-ru/ru-agent-report/SKILL.md) | Отчёт агента: итог задачи, статус, сводка, handoff |
 
-У ядра есть [список редакторских сигналов](skills/writing-ru/russian-text-craft/references/ru-ai-patterns.md) с ложными срабатываниями, [режимы работы с готовым текстом](skills/writing-ru/russian-text-craft/references/editing-modes.md) (корректура, правка, редактура, переработка, сокращение под лимит, учебные работы), [проверка, подтверждает ли источник утверждение](skills/writing-ru/russian-text-craft/references/source-verification.md), и [шаблон калибровки голоса](skills/writing-ru/russian-text-craft/references/author-voice.md).
+У ядра есть [список редакторских сигналов](skills/writing-ru/russian-text-craft/references/ru-ai-patterns.md) с ложными срабатываниями, [режимы работы с готовым текстом](skills/writing-ru/russian-text-craft/references/editing-modes.md) (корректура, правка, редактура, переработка, сокращение под лимит, учебные работы), [правка документа с разметкой детектора](skills/writing-ru/russian-text-craft/references/marked-revision.md) (переписать только отмеченное, остальное сохранить), [проверка, подтверждает ли источник утверждение](skills/writing-ru/russian-text-craft/references/source-verification.md), и [шаблон калибровки голоса](skills/writing-ru/russian-text-craft/references/author-voice.md).
 
 Набор не требует правок ради правок: текст без дефектов остаётся как есть, а признаки из списка — повод проверить суть (факт, источник, оговорку), не перечень запретов.
 
@@ -191,6 +191,7 @@ skills/writing-ru/
     references/author-voice.md       # шаблон калибровки голоса
     references/editorial-triage.md   # исправить / оставить / спросить автора
     references/evaluation-protocol.md # оценка качества семейства
+    references/marked-revision.md    # правка по разметке детектора, проверки сохранности
     references/source-verification.md # подтверждает ли источник утверждение
     scripts/ru_text_check.py
   ru-*/SKILL.md                      # 18 жанров

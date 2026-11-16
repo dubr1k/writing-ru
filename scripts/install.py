@@ -23,7 +23,7 @@ SKILLS = (
     'ru-technical-docs', 'ru-telegram-post', 'ru-transcript-editing', 'ru-translation',
 )
 REFERENCES = ('author-voice.md', 'editing-modes.md', 'ru-ai-patterns.md', 'editorial-triage.md', 'evaluation-protocol.md',
-              'source-verification.md')
+              'marked-revision.md', 'source-verification.md')
 PUBLIC_FILES = tuple(sorted(
     [f'{name}/SKILL.md' for name in SKILLS]
     + [f'russian-text-craft/references/{name}' for name in REFERENCES]
